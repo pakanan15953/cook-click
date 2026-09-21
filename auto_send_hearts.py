@@ -185,7 +185,10 @@ def drag_scroll_bg(hwnd, x_start=200, y_start=370, x_end=200, y_end=335, steps=1
 def load_all_heart_templates():
     """โหลดรูปต้นแบบปุ่มส่งหัวใจทั้งหมด (รองรับทั้งหลายไฟล์ในโฟลเดอร์ และไฟล์เดี่ยว)"""
     templates = []
-    base_dir = os.path.dirname(__file__)
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 1. โหลดจากโฟลเดอร์ templates/send_heart/ (ถ้ามี)
     folder_path = os.path.join(base_dir, "templates", "send_heart")

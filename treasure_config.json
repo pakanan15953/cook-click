@@ -1,0 +1,7 @@
+{
+    "keep_list": [
+        "แคปซูล.png"
+    ],
+    "match_threshold": 0.7,
+    "auto_stop_if_full": true
+}

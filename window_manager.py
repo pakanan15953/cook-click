@@ -18,7 +18,7 @@ VK_SPACE = win32con.VK_SPACE
 VK_ALT = win32con.VK_MENU
 
 def find_render_hwnd(parent_hwnd):
-    """ค้นหาหน้าต่างลูกของ Emulator ที่เป็นหน้าต่างเรนเดอร์/รับอินพุตจริง โดยจัดลำดับความสำคัญของคลาสการแสดงผล"""
+    """ค้นหาหน้าต่างลูกของ Emulator ที่เป็นหน้าต่างเรนเดอร์/รับอินพุตจริง รองรับทุกค่าย (MuMu, LDPlayer, BlueStacks, Nox, MEmu)"""
     children = []
     def cb(hwnd, extra):
         children.append(hwnd)
@@ -31,30 +31,55 @@ def find_render_hwnd(parent_hwnd):
     if not children:
         return parent_hwnd
         
-    # ลำดับความสำคัญ:
-    # 1. หน้าจอหลักของ MuMu (mumunxdevice) ซึ่งเป็นตัวรับคำสั่งคลิก (Input Handler)
+    # ลำดับความสำคัญในการหาหน้าจอรับ Input / Render:
+    # 1. MuMu Player: mumunxdevice / nemudisplay
     for hwnd in children:
-        classname = win32gui.GetClassName(hwnd)
-        title = win32gui.GetWindowText(hwnd)
-        if "mumunxdevice" in title.lower() or "mumunxdevice" in classname.lower():
+        classname = win32gui.GetClassName(hwnd).lower()
+        title = win32gui.GetWindowText(hwnd).lower()
+        if "mumunxdevice" in title or "mumunxdevice" in classname:
+            return hwnd
+
+    # 2. LDPlayer: TheRender / RenderWindow
+    for hwnd in children:
+        classname = win32gui.GetClassName(hwnd).lower()
+        title = win32gui.GetWindowText(hwnd).lower()
+        if "therender" in title or "renderwindow" in classname:
+            return hwnd
+
+    # 3. BlueStacks & MEmu: BlueStacks_Display / MEmuRenderWindow / nemu
+    for hwnd in children:
+        classname = win32gui.GetClassName(hwnd).lower()
+        title = win32gui.GetWindowText(hwnd).lower()
+        if "bluestacks_display" in classname or "memurender" in classname or "nemu" in classname or "nemu" in title:
+            return hwnd
+
+    # 4. NoxPlayer: ScreenBoardClassWindow
+    for hwnd in children:
+        classname = win32gui.GetClassName(hwnd).lower()
+        if "screenboardclasswindow" in classname:
+            return hwnd
+
+    # 5. Generic Render Window (render, d3d, opengl, sub, etc.)
+    for hwnd in children:
+        classname = win32gui.GetClassName(hwnd).lower()
+        title = win32gui.GetWindowText(hwnd).lower()
+        if "render" in classname or "render" in title or "d3d" in classname or "sub" in classname:
             return hwnd
             
-    # 2. หน้าจอแสดงผล (nemudisplay / nemuwin)
+    # Fallback: ถ้าหาไม่เจอ คืนค่าหน้าต่างลูกที่มีขนาดพื้นที่ใหญ่ที่สุด
+    best_hwnd = children[-1]
+    max_area = 0
     for hwnd in children:
-        classname = win32gui.GetClassName(hwnd)
-        title = win32gui.GetWindowText(hwnd)
-        if "nemu" in title.lower() or "nemu" in classname.lower():
-            return hwnd
-            
-    # 3. ตัวเรนเดอร์สำรองอื่นๆ (render / d3d)
-    for hwnd in children:
-        classname = win32gui.GetClassName(hwnd)
-        title = win32gui.GetWindowText(hwnd)
-        if "render" in classname.lower() or "render" in title.lower() or "d3d" in classname.lower():
-            return hwnd
-            
-    # Fallback คืนค่าลูกตัวสุดท้าย
-    return children[-1]
+        try:
+            l, t, r, b = win32gui.GetClientRect(hwnd)
+            area = (r - l) * (b - t)
+            if area > max_area:
+                max_area = area
+                best_hwnd = hwnd
+        except Exception:
+            pass
+
+    return best_hwnd
 
 def human_click_bg(hwnd, x_norm, y_norm, click_name=""):
     """คลิกเมาส์ซ้ายเบื้องหลังจำลองแบบมนุษย์ โดยสเกลพิกัด 800x450 ไปยังพิกัดจริงของหน้าต่างย่อยที่เรนเดอร์เกม"""
@@ -82,7 +107,8 @@ def human_click_bg(hwnd, x_norm, y_norm, click_name=""):
         
         lParam = (y_final << 16) | (x_final & 0xFFFF)
         
-        print(f"🖱️ [Click] '{click_name}' (Target HWND: {target_hwnd}) | สเกล ({x_norm}, {y_norm}) -> พิกัดจริง ({x_final}, {y_final})")
+        if click_name:
+            print(f"🖱️ คลิก: {click_name}")
         
         win32gui.PostMessage(target_hwnd, win32con.WM_MOUSEMOVE, 0, lParam)
         time.sleep(random.uniform(0.03, 0.06))

@@ -23,6 +23,13 @@ def _custom_InferenceSession(path_or_bytes, sess_options=None, *args, **kwargs):
 
 ort.InferenceSession = _custom_InferenceSession
 
+try:
+    import torch
+    torch.set_num_threads(2)
+    torch.set_num_interop_threads(1)
+except Exception:
+    pass
+
 from gui import CookieRunAIApp
 
 if __name__ == "__main__":

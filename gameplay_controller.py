@@ -17,6 +17,8 @@ from datetime import datetime
 import traceback
 from ultralytics import YOLO
 
+from fsm import FSMEngine
+
 from window_manager import (
     find_render_hwnd, human_click_bg, human_press_bg,
     _printwindow_capture, capture_window_bg,
@@ -171,21 +173,6 @@ class GameplayControllerCore:
         self.target_session_runs = random.randint(9, 12)
         self.rest_end_time = 0
         
-        # Game Flow States
-        self.STATE_PLAYING = "PLAYING"
-        self.STATE_WAIT_OK = "WAIT_OK"
-        self.STATE_WAIT_OPENALL = "WAIT_OPENALL"
-        self.STATE_WAIT_CONFIRM_OPENALL = "WAIT_CONFIRM_OPENALL"
-        self.STATE_WAIT_PLAYLOBBY = "WAIT_PLAYLOBBY"
-        self.STATE_WAIT_SELECTBUFF_1 = "WAIT_SELECTBUFF_1"
-        self.STATE_WAIT_SELECTBUFF_2 = "WAIT_SELECTBUFF_2"
-        self.STATE_WAIT_SELECTBUFF_3 = "WAIT_SELECTBUFF_3"
-        self.STATE_WAIT_BUFF_RESULT = "WAIT_BUFF_RESULT"
-        self.STATE_WAIT_START = "WAIT_START"
-        self.STATE_WAIT_LOADING = "WAIT_LOADING"
-        self.STATE_RESTING = "RESTING"
-        
-        self.current_state = self.STATE_PLAYING
         self.last_action_time = 0
         self.last_random_jump_check_time = 0
         self.last_switch_check_time = 0
@@ -206,21 +193,49 @@ class GameplayControllerCore:
         self.estimated_speed = 350.0
         self.autostart_templates = {}
 
+        # FSM Engine
+        self.use_fsm_engine = True
+        self.fsm_engine = None
+
     def scan_mumu_windows(self):
-        """สแกนหาหน้าต่าง MuMu Player ทั้งหมดที่เปิดอยู่"""
+        """สแกนหาหน้าต่างโปรแกรมที่เปิดอยู่ทั้งหมด โดยจัดลำดับ Emulator (MuMu, LDPlayer, BlueStacks, Nox ฯลฯ) ขึ้นมาอันดับแรก"""
         windows = {}
+        emu_matches = {}
+        other_matches = {}
+
         def enum_cb(h, extra):
             if win32gui.IsWindowVisible(h):
-                t = win32gui.GetWindowText(h)
-                c = win32gui.GetClassName(h)
-                if t and ("android device" in t.lower() or "mumuplayer" in t.lower() or "mumu" in c.lower() or "mumu" in t.lower()):
-                    label = f"{t} (HWND: {h})"
-                    windows[label] = h
+                t = win32gui.GetWindowText(h).strip()
+                c = win32gui.GetClassName(h).strip()
+                if not t:
+                    return True
+                # กรองหน้าต่างระบบที่ไม่จำเป็นออก
+                ignored_titles = ["program manager", "default ime", "msctfime ui", "settings", "windows input experience"]
+                if t.lower() in ignored_titles:
+                    return True
+                
+                # เช็คว่าเป็น Emulator หรือไม่
+                tl = t.lower()
+                cl = c.lower()
+                is_emu = any(k in tl or k in cl for k in [
+                    "mumu", "ldplayer", "dnplayer", "bluestacks", "nox", "memu", "android device", "cookierun", "cookie run"
+                ])
+
+                label = f"{t} (HWND: {h})"
+                if is_emu:
+                    emu_matches[label] = h
+                else:
+                    other_matches[label] = h
             return True
+
         try:
             win32gui.EnumWindows(enum_cb, None)
         except Exception:
             pass
+
+        # รวม Emulator ไว้ด้านบนสุด ตามด้วยหน้าต่างทั่วไป
+        windows.update(emu_matches)
+        windows.update(other_matches)
         return windows
 
     def init_resources(self):
@@ -232,7 +247,7 @@ class GameplayControllerCore:
             print(f"✅ เชื่อมต่อหน้าต่าง Emulator สำเร็จ! ({first_label})")
         else:
             self.hwnd = None
-            print("❌ ไม่พบหน้าต่างโปรแกรมจำลอง MuMu Player! กรุณาเปิดโปรแกรมจำลองขึ้นมาก่อนรันบอท")
+            print("❌ ไม่พบหน้าต่างโปรแกรมจำลอง! กรุณาเปิดโปรแกรมจำลองขึ้นมาก่อนรันบอท")
 
         if getattr(sys, 'frozen', False):
             script_dir = os.path.dirname(os.path.abspath(sys.executable))
@@ -280,7 +295,8 @@ class GameplayControllerCore:
             "selectbuff_2": "selectbuff_2.png",
             "selectbuff_3": "selectbuff_3.png",
             "affterselectbuff": "affterselectbuff_1.png",
-            "confirmlevelup": "confirmlevelup1.png"
+            "confirmlevelup": "confirmlevelup1.png",
+            "popup_confirm_green": "popup_confirm_green.png"
         }
         
         for name, filename in autostart_files.items():
@@ -292,6 +308,12 @@ class GameplayControllerCore:
                         h, w = img.shape[:2]
                         img = cv2.resize(img, (int(w * 0.85), int(h * 0.85)))
                     self.autostart_templates[name] = img
+
+        try:
+            self.fsm_engine = FSMEngine(self)
+            print("🛡️ [FSM Engine v2] พร้อมทำงานในโหมด Clean Architecture!")
+        except Exception as e:
+            print(f"⚠️ ไม่สามารถโหลด FSMEngine: {e}")
 
     def _init_ocr(self):
         try:
